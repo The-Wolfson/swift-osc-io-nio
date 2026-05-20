@@ -117,25 +117,15 @@ extension OSCUDPClient.Core {
     private func _start(isIPv4: Bool) throws -> (any Channel)? {
         if isIPv4 { _stopIPv4() } else { _stopIPv6() }
         
-        let reuseAddress: ChannelOptions.Types.SocketOption.Value = isPortReuseEnabled ? 1 : 0
-        let broadcast: ChannelOptions.Types.SocketOption.Value = _isIPv4BroadcastEnabled ? 1 : 0
-        
         // bind to interface, if specified
-        let host: String = if let interface {
-            switch interface {
-            case "0.0.0.0", "::":
-                interface // pass thru wildcard
-            default:
-                try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, isIPv6Enabled: isIPv6Enabled)
-            }
-        } else {
-            // Don't bind to "localhost", "127.0.0.1" (IPv4) or "::1" (IPv6)
-            isIPv4 ? "0.0.0.0" : "::"
-        }
+        // `nil` return value is not an error condition; just means this channel is not used
+        guard let host = try hostAddressStringForBinding(interface: interface, isIPv4: isIPv4) else { return nil }
         
         let port = Int(_localPort ?? 0)
         
         // Channel Setup
+        let reuseAddress: ChannelOptions.Types.SocketOption.Value = isPortReuseEnabled ? 1 : 0
+        let broadcast: ChannelOptions.Types.SocketOption.Value = _isIPv4BroadcastEnabled ? 1 : 0
         let bootstrap = DatagramBootstrap(group: .singletonMultiThreadedEventLoopGroup)
             // configure port reuse
             .channelOption(.socketOption(.so_reuseaddr), value: reuseAddress)
@@ -178,7 +168,7 @@ extension OSCUDPClient.Core {
             }
 
             // resolve host and port to `SocketAddress`
-            let remoteAddress = try resolveSocketAddress(forHostnameOrIPAddress: host, port: port, isIPv6Enabled: isIPv6Enabled)
+            let remoteAddress = try resolveSocketAddressPreferringIPv4(forHostnameOrIPAddress: host, port: port, isIPv6Enabled: isIPv6Enabled)
             
             // use corresponding channel for IP protocol
             let channel = switch remoteAddress.protocol {

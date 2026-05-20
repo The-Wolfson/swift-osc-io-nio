@@ -17,7 +17,7 @@ func networkDevices() throws -> [(name: String, address: SocketAddress)] {
         }
 }
 
-/// Returns the first network device that carries an IPv4 address with a name or address that matches the given string.
+/// Returns the all network devices that carry an IP address with a name or address that matches the given string.
 func networkDevices(
     matchingNameOrAddress interface: String,
     protocols: [NIOBSDSocket.ProtocolFamily]? = nil
@@ -26,6 +26,7 @@ func networkDevices(
 
     if let protocols {
         devices = devices
+            .filter { $0.address.ipAddress != nil }
             .filter { protocols.contains($0.address.protocol) }
     }
 
@@ -113,20 +114,59 @@ func resolveSocketAddressString(ofNetworkDeviceNameOrAddress interface: String, 
 }
 
 /// Attempts to resolve a hostname or IP address to an appropriate IP address.
-func resolveSocketAddress(
+func resolveSocketAddressPreferringIPv4(
     forHostnameOrIPAddress host: String,
     port: UInt16,
     isIPv6Enabled: Bool
 ) throws -> SocketAddress {
     // Note: NIO forces resolving a hostname to its IPv6 address if both IPv4 and IPv6 addresses
     // are mapped to it, but we want more control over which IP protocol we're asking for.
-    // First try resolving the preferred IP protocol, then defer back to NIO if that fails.
-    if let string = IPUtils.ipAddress(
-        forHostnameOrIPAddress: host,
-        family: isIPv6Enabled ? .ipv6 : .ipv4
-    ) {
+    
+    // First try resolving IPv4, then if that does not return an address check for IPv6 if IPv6 is allowed
+    if let string = try IPUtils.ipAddress(forHostnameOrIPAddress: host, family: .ipv4) {
+        try SocketAddress(ipAddress: string, port: Int(port))
+    } else if isIPv6Enabled,
+              let string = try IPUtils.ipAddress(forHostnameOrIPAddress: host, family: .ipv6)
+    {
         try SocketAddress(ipAddress: string, port: Int(port))
     } else {
-        try SocketAddress.makeAddressResolvingHost(host, port: Int(port))
+        // Note that we have no control over which protocol NIO resolves to
+        // try SocketAddress.makeAddressResolvingHost(host, port: Int(port))
+        throw OSCIOError.noRemoteHost // TODO: not the most appropriate error case, could use a new one
+    }
+}
+
+/// Parses `interface` parameter input and returns a suitable interface host address to bind to for the given channel (IPv4 or IPv6).
+/// This method is designed to be used by OSC classes that implement dual channels for both IPv4 or IPv6.
+/// If the channel is not used, `nil` is returned and is not an error condition.
+func hostAddressStringForBinding(interface: String?, isIPv4: Bool) throws -> String? {
+    if let interface {
+        // allow use of wildcard addresses
+        if interface == "0.0.0.0" || interface == "::" {
+            if interface == "0.0.0.0", isIPv4 {
+                "0.0.0.0"
+            } else if interface == "::", !isIPv4 {
+                "::"
+            } else {
+                nil
+            }
+        }
+        // interface supplied by the user could be IPv4 or IPv6. we only want to attempt to
+        // bind to the appropriate IP protocol since this classes uses two channels (IPv4 and IPv6)
+        else if let addr = try? SocketAddress(ipAddress: interface, port: 1) {
+            // interface is an address and not a name
+            if addr.protocol == (isIPv4 ? .inet : .inet6) {
+                try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, isIPv6Enabled: !isIPv4)
+            } else {
+                nil
+            }
+        }
+        // interface is likely a name and not an address
+        else {
+            try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, isIPv6Enabled: !isIPv4)
+        }
+    } else {
+        // Don't bind to "localhost", "127.0.0.1" (IPv4) or "::1" (IPv6)
+        isIPv4 ? "0.0.0.0" : "::"
     }
 }

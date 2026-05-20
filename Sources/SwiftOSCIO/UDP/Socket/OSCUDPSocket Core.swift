@@ -124,31 +124,18 @@ extension OSCUDPSocket.Core {
     private func _start(isIPv4: Bool) throws -> (any Channel)? {
         if isIPv4 { _stopIPv4() } else { _stopIPv6() }
         
+        // bind to interface, if specified
+        // `nil` return value is not an error condition; just means this channel is not used
+        guard let host = try hostAddressStringForBinding(interface: interface, isIPv4: isIPv4) else { return nil }
+        
+        let port = Int(_localPort ?? localPort)
+        
         let broadcast: ChannelOptions.Types.SocketOption.Value = isIPv4BroadcastEnabled ? 1 : 0
         let bootstrap = DatagramBootstrap(group: .singletonMultiThreadedEventLoopGroup)
             .channelOption(.socketOption(.so_broadcast), value: broadcast)
             .channelInitializer { channel in
                 channel.pipeline.addHandler(OSCUDPChannelHandler(oscServer: self))
             }
-        
-        // bind to interface, if specified
-        let host: String = if let interface {
-            switch interface {
-            case "0.0.0.0", "::":
-                interface // pass thru wildcard
-            default:
-                if let remoteHost {
-                    try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, forRemoteHost: remoteHost)
-                } else {
-                    try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, isIPv6Enabled: isIPv6Enabled)
-                }
-            }
-        } else {
-            // Don't bind to "localhost", "127.0.0.1" (IPv4) or "::1" (IPv6)
-            isIPv4 ? "0.0.0.0" : "::"
-        }
-        
-        let port = Int(_localPort ?? localPort)
         
         let configuredChannel = bootstrap
             .bind(host: host, port: port)
@@ -197,7 +184,7 @@ extension OSCUDPSocket.Core {
             }
             
             // resolve host and port to `SocketAddress`
-            let remoteAddress = try resolveSocketAddress(forHostnameOrIPAddress: host, port: port, isIPv6Enabled: isIPv6Enabled)
+            let remoteAddress = try resolveSocketAddressPreferringIPv4(forHostnameOrIPAddress: host, port: port, isIPv6Enabled: isIPv6Enabled)
             
             // use corresponding channel for IP protocol
             let channel = switch remoteAddress.protocol {
