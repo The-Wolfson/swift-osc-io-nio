@@ -46,7 +46,7 @@ extension OSCUDPClient {
         }
         private var _isIPv4BroadcastEnabled: Bool = false
 
-        var isIPv6Enabled: Bool = true {
+        var isIPv6Enabled: Bool {
             didSet {
                 if isStarted {
                     print("Setting isIPv6Enabled will not have any effect until the UDP client is stopped and started again.")
@@ -71,12 +71,14 @@ extension OSCUDPClient {
             interface: String?,
             isPortReuseEnabled: Bool,
             isIPv4BroadcastEnabled: Bool,
+            isIPv6Enabled: Bool,
             queue: DispatchQueue?
         ) {
             self.queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPClient.queue", target: .global())
             _localPort = (localPort == nil || localPort == 0) ? nil : localPort
             self.interface = interface
             self.isPortReuseEnabled = isPortReuseEnabled
+            self.isIPv6Enabled = isIPv6Enabled
             self.isIPv4BroadcastEnabled = isIPv4BroadcastEnabled
         }
 

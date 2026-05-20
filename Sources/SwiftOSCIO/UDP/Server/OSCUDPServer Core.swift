@@ -32,7 +32,7 @@ extension OSCUDPServer {
 
         var isPortReuseEnabled: Bool = false
 
-        var isIPv6Enabled: Bool = true {
+        var isIPv6Enabled: Bool {
             didSet {
                 if isStarted {
                     print("Setting isIPv6Enabled will not have any effect until the UDP server is stopped and started again.")
@@ -56,12 +56,14 @@ extension OSCUDPServer {
             port: UInt16?,
             interface: String?,
             isPortReuseEnabled: Bool,
+            isIPv6Enabled: Bool,
             queue: DispatchQueue?,
             receiveHandler: OSCPacketHandler?
         ) {
             _localPort = (port == nil || port == 0) ? nil : port
             self.interface = interface
             self.isPortReuseEnabled = isPortReuseEnabled
+            self.isIPv6Enabled = isIPv6Enabled
             let queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPServer.queue", target: .global())
             self.queue = queue
             self.receiveHandler = receiveHandler

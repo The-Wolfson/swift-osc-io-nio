@@ -15,6 +15,7 @@ public final class OSCUDPServer: OSCUDPServerProtocol {
         port: UInt16?,
         interface: String?,
         isPortReuseEnabled: Bool,
+        isIPv6Enabled: Bool,
         queue: DispatchQueue?,
         receiveHandler: OSCPacketHandler?
     ) {
@@ -22,6 +23,7 @@ public final class OSCUDPServer: OSCUDPServerProtocol {
             port: port,
             interface: interface,
             isPortReuseEnabled: isPortReuseEnabled,
+            isIPv6Enabled: isIPv6Enabled,
             queue: queue,
             receiveHandler: receiveHandler
         )

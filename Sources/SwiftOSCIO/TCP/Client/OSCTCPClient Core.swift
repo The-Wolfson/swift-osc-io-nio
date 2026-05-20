@@ -24,7 +24,7 @@ extension OSCTCPClient {
         let remotePort: UInt16
         let interface: String?
         
-        var isIPv6Enabled: Bool = false {
+        var isIPv6Enabled: Bool {
             didSet {
                 if isConnected {
                     print("Setting isIPv6Enabled will not have any effect until the TCP client is disconnected and reconnected again.")
@@ -42,6 +42,7 @@ extension OSCTCPClient {
             remoteHost: String,
             remotePort: UInt16,
             interface: String?,
+            isIPv6Enabled: Bool,
             framingMode: OSCTCPFramingMode,
             queue: DispatchQueue?,
             receiveHandler: OSCPacketHandler?
@@ -49,6 +50,7 @@ extension OSCTCPClient {
             self.remoteHost = remoteHost
             self.remotePort = remotePort
             self.interface = interface
+            self.isIPv6Enabled = isIPv6Enabled
             self.framingMode = framingMode
             let queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPClient.queue", target: .global())
             self.queue = queue

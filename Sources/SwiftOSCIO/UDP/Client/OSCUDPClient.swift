@@ -15,13 +15,15 @@ public final class OSCUDPClient: OSCUDPClientProtocol {
         localPort: UInt16?,
         interface: String?,
         isPortReuseEnabled: Bool,
-        isIPv4BroadcastEnabled: Bool
+        isIPv4BroadcastEnabled: Bool,
+        isIPv6Enabled: Bool
     ) {
         core = Core(
             localPort: localPort,
             interface: interface,
             isPortReuseEnabled: isPortReuseEnabled,
             isIPv4BroadcastEnabled: isIPv4BroadcastEnabled,
+            isIPv6Enabled: isIPv6Enabled,
             queue: nil
         )
     }
