@@ -81,19 +81,26 @@ extension OSCTCPServer.Core {
                     channel.eventLoop.makeCompletedFuture {
                         switch self.framingMode {
                         case .osc1_0:
-                            try channel.pipeline.syncOperations.addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
+                            try channel.pipeline.syncOperations
+                                .addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
                         case .osc1_1:
-                            try channel.pipeline.syncOperations.addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
+                            try channel.pipeline.syncOperations
+                                .addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
                         }
-                        try channel.pipeline.syncOperations.addHandler(ChildChannelHandler(server: self))
+                        try channel.pipeline.syncOperations
+                            .addHandler(ChildChannelHandler(server: self))
                     }
                 }
 
             // bind to interface, if specified
-            let host: String = if let interface, isIPv6Enabled {
+            let host: String = if let interface {
                 switch interface {
-                case "0.0.0.0", "::": interface // pass thru wildcard
-                default: try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, isIPv6Enabled: isIPv6Enabled)
+                case "0.0.0.0",
+                     "::" where isIPv6Enabled:
+                    // pass thru wildcard
+                    interface
+                default:
+                    try resolveSocketAddressString(ofNetworkDeviceNameOrAddress: interface, isIPv6Enabled: isIPv6Enabled)
                 }
             } else {
                 // Don't bind to "localhost", "127.0.0.1" (IPv4) or "::1" (IPv6)
@@ -221,7 +228,12 @@ extension OSCTCPServer.Core {
 
     func addClient(channel: any Channel) -> OSCTCPClientSessionID {
         let clientID = newClientID()
-        let connection = ClientConnection(server: self, channel: channel, clientID: clientID, framingMode: framingMode)
+        let connection = ClientConnection(
+            server: self,
+            channel: channel,
+            clientID: clientID,
+            framingMode: framingMode
+        )
         queue.sync {
             _clients[clientID] = connection
         }

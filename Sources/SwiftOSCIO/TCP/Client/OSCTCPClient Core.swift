@@ -32,6 +32,8 @@ extension OSCTCPClient {
             }
         }
         
+        var isIPv6AddressTranslationToIPv4Enabled: Bool = false
+        
         var isConnected: Bool {
             channel?.isActive ?? false
         }
@@ -70,6 +72,7 @@ extension OSCTCPClient.Core: @unchecked Sendable { } // TODO: unchecked
 extension OSCTCPClient.Core {
     func connect(timeout: TimeInterval) throws {
         try queue.sync {
+            // sanitize inputs
             // negative values mean indefinite (no timeout) which is a bit dangerous
             let timeout = Int64(max(1.0, timeout))
 
@@ -83,9 +86,11 @@ extension OSCTCPClient.Core {
                         // chose which decoder to use
                         switch self.framingMode {
                         case .osc1_0: // Length Header
-                            try channel.pipeline.syncOperations.addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
+                            try channel.pipeline.syncOperations
+                                .addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
                         case .osc1_1: // SLIP
-                            try channel.pipeline.syncOperations.addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
+                            try channel.pipeline.syncOperations
+                                .addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
                         }
                         // add client handler
                         try channel.pipeline.syncOperations.addHandler(handler)
@@ -95,7 +100,9 @@ extension OSCTCPClient.Core {
             // bind to interface, if specified
             if let interface {
                 let interfaceAddress = switch interface {
-                case "0.0.0.0", "::": // pass thru wildcard
+                case "0.0.0.0",
+                     "::" where isIPv6Enabled:
+                    // pass thru wildcard
                     try SocketAddress.makeAddressResolvingHost(interface, port: 0)
                 default:
                     try resolveSocketAddress(ofNetworkDeviceNameOrAddress: interface, forRemoteHost: remoteHost)

@@ -184,7 +184,11 @@ extension OSCUDPSocket.Core {
             }
             
             // resolve host and port to `SocketAddress`
-            let remoteAddress = try resolveSocketAddressPreferringIPv4(forHostnameOrIPAddress: host, port: port, isIPv6Enabled: isIPv6Enabled)
+            let remoteAddress = try resolveSocketAddressPreferringIPv4(
+                forHostnameOrIPAddress: host,
+                port: port,
+                isIPv6Enabled: isIPv6Enabled
+            )
             
             // use corresponding channel for IP protocol
             let channel = switch remoteAddress.protocol {
