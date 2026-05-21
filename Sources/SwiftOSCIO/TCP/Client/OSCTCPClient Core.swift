@@ -111,13 +111,23 @@ extension OSCTCPClient.Core {
                 bootstrap = bootstrap
                     .bind(to: interfaceAddress)
             }
-
-            let resolvedAddress = try resolveSocketAddress(
-                forHostnameOrIPAddress: remoteHost,
-                port: remotePort,
-                isIPv6Enabled: isIPv6Enabled
-            )
-
+            
+            let resolvedAddress: SocketAddress
+            if !isIPv6Enabled, isIPv6AddressTranslationToIPv4Enabled {
+                // translate an IPv6 host/IP to an IPv4 if possible.
+                let proposedRemoteHost = try IPUtils.ipAddressUsingReverseLookup(forHostnameOrIPAddress: self.remoteHost, family: .ipv4)
+                guard let proposedRemoteHost else {
+                    throw OSCIOError.noRemoteHost // TODO: could use a new invalidRemoteHost case
+                }
+                resolvedAddress = try SocketAddress(ipAddress: proposedRemoteHost, port: Int(remotePort))
+            } else {
+                resolvedAddress = try resolveSocketAddressPreferringIPv4(
+                    forHostnameOrIPAddress: remoteHost,
+                    port: remotePort,
+                    isIPv6Enabled: isIPv6Enabled
+                )
+            }
+            
             // connect to host
             let configuredChannel = try bootstrap
                 .connect(to: resolvedAddress)
