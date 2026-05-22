@@ -41,6 +41,10 @@ extension OSCTCPClient {
         }
         nonisolated(unsafe) private var _notificationHandler: Parent.NotificationHandlerBlock?
 
+        var localPort: UInt16? {
+            if let port = channel?.localAddress?.port { UInt16(port) } else { nil }
+        }
+        
         let remoteHost: String
         
         let remotePort: UInt16
