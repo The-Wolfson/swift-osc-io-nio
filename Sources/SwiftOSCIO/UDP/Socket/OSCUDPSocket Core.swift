@@ -15,27 +15,29 @@ extension OSCUDPSocket {
 
         /// Internal queue used for synchronizing access to mutable properties.
         let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPSocket.Core.syncQueue", target: .global())
-        
+
         let queue: DispatchQueue
-        
+
         // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
         // so we don't need to wrap it with `syncQueue` to synchronize
         nonisolated(unsafe) private var ipv4Channel: (any Channel)?
-        
+
         // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
         // so we don't need to wrap it with `syncQueue` to synchronize
         nonisolated(unsafe) private var ipv6Channel: (any Channel)?
-        
+
         var receiveHandler: OSCPacketHandler? {
             get { syncQueue.sync { _receiveHandler } }
             set { syncQueue.sync { _receiveHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _receiveHandler: OSCPacketHandler?
-        
+
         var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
             get { syncQueue.sync { _receiveErrorHandler } }
             set { syncQueue.sync { _receiveErrorHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _receiveErrorHandler: OSCDecodeErrorHandlerBlock?
 
         var remoteHost: String? {
@@ -47,10 +49,11 @@ extension OSCUDPSocket {
                 }
             }
         }
+
         nonisolated(unsafe) private var _remoteHost: String?
 
         var localPort: UInt16 {
-            if let port = ipv4Channel?.localAddress?.port ?? ipv6Channel?.localAddress?.port{
+            if let port = ipv4Channel?.localAddress?.port ?? ipv6Channel?.localAddress?.port {
                 return UInt16(port)
             }
             return preferredLocalPort ?? 0
@@ -60,12 +63,14 @@ extension OSCUDPSocket {
             get { syncQueue.sync { _preferredLocalPort } }
             set { syncQueue.sync { _preferredLocalPort = newValue } }
         }
+
         nonisolated(unsafe) private var _preferredLocalPort: UInt16?
 
         var remotePort: UInt16 {
             get { syncQueue.sync { _remotePort } ?? localPort }
             set { syncQueue.sync { _remotePort = (newValue == 0) ? nil : newValue } }
         }
+
         nonisolated(unsafe) private var _remotePort: UInt16?
 
         let interface: String?
@@ -83,16 +88,17 @@ extension OSCUDPSocket {
                 }
             }
         }
+
         nonisolated(unsafe) private var _isIPv6Enabled: Bool
 
         var isStarted: Bool {
             isIPv4Started || isIPv6Started
         }
-        
+
         private var isIPv4Started: Bool {
             ipv4Channel?.isActive ?? false
         }
-        
+
         private var isIPv6Started: Bool {
             ipv6Channel?.isActive ?? false
         }
@@ -137,44 +143,44 @@ extension OSCUDPSocket.Core {
             try _start()
         }
     }
-    
+
     func _start() throws {
         try _startIPv4()
         if isIPv6Enabled { try _startIPv6() }
     }
-    
+
     private func _startIPv4() throws {
         guard !isIPv4Started else { return }
         if let channel = try _start(isIPv4: true) { ipv4Channel = channel }
     }
-    
+
     private func _startIPv6() throws {
         guard !isIPv6Started else { return }
         if let channel = try _start(isIPv4: false) { ipv6Channel = channel }
     }
-    
+
     private func _start(isIPv4: Bool) throws -> (any Channel)? {
         if isIPv4 { _stopIPv4() } else { _stopIPv6() }
-        
+
         // bind to interface, if specified
         // `nil` return value is not an error condition; just means this channel is not used
         guard let host = try hostAddressStringForBinding(interface: interface, isIPv4: isIPv4) else { return nil }
-        
+
         let port = Int(preferredLocalPort ?? localPort)
-        
+
         let broadcast: ChannelOptions.Types.SocketOption.Value = isIPv4BroadcastEnabled ? 1 : 0
         let bootstrap = DatagramBootstrap(group: .singletonMultiThreadedEventLoopGroup)
             .channelOption(.socketOption(.so_broadcast), value: broadcast)
             .channelInitializer { channel in
                 channel.pipeline.addHandler(OSCUDPChannelHandler(oscServer: self))
             }
-        
+
         let configuredChannel = bootstrap
             .bind(host: host, port: port)
-        
+
         let waitingChannel = try configuredChannel
             .wait()
-        
+
         return waitingChannel
     }
 
@@ -184,12 +190,12 @@ extension OSCUDPSocket.Core {
             _stopIPv6()
         }
     }
-    
+
     private func _stopIPv4() {
         try? ipv4Channel?.close().wait()
         ipv4Channel = nil
     }
-    
+
     private func _stopIPv6() {
         try? ipv6Channel?.close().wait()
         ipv6Channel = nil
@@ -208,35 +214,35 @@ extension OSCUDPSocket.Core {
             guard isStarted else {
                 throw OSCIOError.notStarted
             }
-            
+
             let port = port ?? remotePort
-            
+
             guard let host = host ?? remoteHost else {
                 throw OSCIOError.noRemoteHost
             }
-            
+
             // resolve host and port to `SocketAddress`
             let remoteAddress = try resolveSocketAddressPreferringIPv4(
                 forHostnameOrIPAddress: host,
                 port: port,
                 isIPv6Enabled: isIPv6Enabled
             )
-            
+
             // use corresponding channel for IP protocol
             let channel = switch remoteAddress.protocol {
             case .inet: ipv4Channel
             case .inet6: ipv6Channel
             default: throw OSCIOError.noRemoteHost
             }
-            
+
             guard let channel else {
                 throw OSCIOError.notStarted
             }
-            
+
             // create buffer from data
             let data = try packet.rawData()
             let buffer: ByteBuffer = channel.allocator.buffer(bytes: data)
-            
+
             let envelope = AddressedEnvelope(remoteAddress: remoteAddress, data: buffer)
             try channel.writeAndFlush(envelope)
                 .wait()

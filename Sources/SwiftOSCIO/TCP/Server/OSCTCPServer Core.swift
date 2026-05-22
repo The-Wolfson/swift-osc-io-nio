@@ -20,7 +20,7 @@ extension OSCTCPServer {
         // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
         // so we don't need to wrap it with `syncQueue` to synchronize
         nonisolated(unsafe) var channel: (any Channel)?
-        
+
         /// Currently connected client sessions.
         private var _clients: [OSCTCPClientSessionID: ClientConnection] {
             get {
@@ -35,26 +35,30 @@ extension OSCTCPServer {
                 syncQueue.sync { __clients = newValue }
             }
         }
+
         nonisolated(unsafe) private var __clients: [OSCTCPClientSessionID: ClientConnection] = [:]
-        
+
         let queue: DispatchQueue
-        
+
         var receiveHandler: OSCPacketHandler? {
             get { syncQueue.sync { _receiveHandler } }
             set { syncQueue.sync { _receiveHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _receiveHandler: OSCPacketHandler?
-        
+
         var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
             get { syncQueue.sync { _receiveErrorHandler } }
             set { syncQueue.sync { _receiveErrorHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _receiveErrorHandler: OSCDecodeErrorHandlerBlock?
-        
+
         var notificationHandler: Parent.NotificationHandlerBlock? {
             get { syncQueue.sync { _notificationHandler } }
             set { syncQueue.sync { _notificationHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _notificationHandler: Parent.NotificationHandlerBlock?
 
         var localPort: UInt16 {
@@ -65,6 +69,7 @@ extension OSCTCPServer {
             get { syncQueue.sync { _preferredLocalPort } }
             set { syncQueue.sync { _preferredLocalPort = newValue } }
         }
+
         nonisolated(unsafe) private var _preferredLocalPort: UInt16?
 
         let interface: String?
@@ -80,6 +85,7 @@ extension OSCTCPServer {
                 }
             }
         }
+
         nonisolated(unsafe) private var _isIPv6Enabled: Bool
 
         var isStarted: Bool {
@@ -122,20 +128,23 @@ extension OSCTCPServer.Core {
     func start() throws {
         try queue.sync {
             guard !isStarted else { return }
-            
+
             let bootstrap = ServerBootstrap(group: .singletonMultiThreadedEventLoopGroup)
                 .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
                 .childChannelInitializer { channel in
                     channel.eventLoop.makeCompletedFuture {
                         switch self.framingMode {
                         case .osc1_0:
-                            try channel.pipeline.syncOperations
+                            try channel.pipeline
+                                .syncOperations
                                 .addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
                         case .osc1_1:
-                            try channel.pipeline.syncOperations
+                            try channel.pipeline
+                                .syncOperations
                                 .addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
                         }
-                        try channel.pipeline.syncOperations
+                        try channel.pipeline
+                            .syncOperations
                             .addHandler(ChildChannelHandler(server: self))
                     }
                 }
@@ -159,7 +168,7 @@ extension OSCTCPServer.Core {
 
             let configuredChannel = bootstrap
                 .bind(host: host, port: port)
-            
+
             channel = try configuredChannel
                 .wait()
         }
@@ -287,7 +296,7 @@ extension OSCTCPServer.Core {
                 // don't allow 0 or negative numbers
                 clientID = Int.random(in: 1 ... Int.max)
             }
-            
+
             assert(clientID > 0)
             return clientID
         }

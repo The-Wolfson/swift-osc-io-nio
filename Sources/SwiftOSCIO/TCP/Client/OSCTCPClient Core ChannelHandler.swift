@@ -16,12 +16,13 @@ extension OSCTCPClient.Core {
 
         /// Internal queue used for synchronizing access to mutable properties.
         let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPClient.Core.ChannelHandler.syncQueue", target: .global())
-        
+
         /// Stores an error captured in `errorCaught` for use in `channelInactive`.
         private var pendingError: (any Error)? {
             get { syncQueue.sync { _pendingError } }
             set { syncQueue.sync { _pendingError = newValue } }
         }
+
         nonisolated(unsafe) private var _pendingError: (any Error)?
 
         init(oscServer: (any _OSCTCPPacketDispatcherProtocol & OSCTCPGeneratesClientNotificationsProtocol)? = nil) {

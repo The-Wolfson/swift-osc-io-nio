@@ -64,7 +64,7 @@ extension OSCTCPServer.Core.ClientConnection: _OSCTCPPacketDispatcherProtocol {
     var receiveHandler: OSCPacketHandler? {
         oscServer?.receiveHandler
     }
-    
+
     var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
         oscServer?.receiveErrorHandler
     }

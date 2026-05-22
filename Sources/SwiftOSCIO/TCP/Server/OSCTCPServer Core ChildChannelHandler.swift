@@ -11,14 +11,15 @@ extension OSCTCPServer.Core {
     final class ChildChannelHandler {
         nonisolated(unsafe)
         weak var server: OSCTCPServer.Core?
-        
+
         /// Internal queue used for synchronizing access to mutable properties.
         let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPServer.Core.ChildChannelHandler.syncQueue", target: .global())
-        
+
         var clientID: OSCTCPClientSessionID {
             get { syncQueue.sync { _clientID } }
             set { syncQueue.sync { _clientID = newValue } }
         }
+
         nonisolated(unsafe) private var _clientID: OSCTCPClientSessionID = 0
 
         /// Stores an error captured in `errorCaught` for use in `channelInactive`.
@@ -26,6 +27,7 @@ extension OSCTCPServer.Core {
             get { syncQueue.sync { _pendingError } }
             set { syncQueue.sync { _pendingError = newValue } }
         }
+
         nonisolated(unsafe) private var _pendingError: (any Error)?
 
         init(server: OSCTCPServer.Core? = nil) {

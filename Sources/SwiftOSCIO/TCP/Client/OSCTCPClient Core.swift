@@ -16,41 +16,44 @@ extension OSCTCPClient {
 
         /// Internal queue used for synchronizing access to mutable properties.
         let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPClient.Core.syncQueue", target: .global())
-        
+
         // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
         // so we don't need to wrap it with `syncQueue` to synchronize
         nonisolated(unsafe) var channel: (any Channel)?
-        
+
         let queue: DispatchQueue
-        
+
         var receiveHandler: OSCPacketHandler? {
             get { syncQueue.sync { _receiveHandler } }
             set { syncQueue.sync { _receiveHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _receiveHandler: OSCPacketHandler?
-        
+
         var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
             get { syncQueue.sync { _receiveErrorHandler } }
             set { syncQueue.sync { _receiveErrorHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _receiveErrorHandler: OSCDecodeErrorHandlerBlock?
-        
+
         var notificationHandler: Parent.NotificationHandlerBlock? {
             get { syncQueue.sync { _notificationHandler } }
             set { syncQueue.sync { _notificationHandler = newValue } }
         }
+
         nonisolated(unsafe) private var _notificationHandler: Parent.NotificationHandlerBlock?
 
         var localPort: UInt16? {
             if let port = channel?.localAddress?.port { UInt16(port) } else { nil }
         }
-        
+
         let remoteHost: String
-        
+
         let remotePort: UInt16
-        
+
         let interface: String?
-        
+
         var isIPv6Enabled: Bool {
             get {
                 syncQueue.sync { _isIPv6Enabled }
@@ -62,14 +65,16 @@ extension OSCTCPClient {
                 }
             }
         }
+
         nonisolated(unsafe) private var _isIPv6Enabled: Bool
-        
+
         var isIPv6AddressTranslationToIPv4Enabled: Bool {
             get { syncQueue.sync { _isIPv6AddressTranslationToIPv4Enabled } }
             set { syncQueue.sync { _isIPv6AddressTranslationToIPv4Enabled = newValue } }
         }
+
         nonisolated(unsafe) private var _isIPv6AddressTranslationToIPv4Enabled: Bool = false
-        
+
         var isConnected: Bool {
             channel?.isActive ?? false
         }
@@ -125,10 +130,12 @@ extension OSCTCPClient.Core {
                         // chose which decoder to use
                         switch self.framingMode {
                         case .osc1_0: // Length Header
-                            try channel.pipeline.syncOperations
+                            try channel.pipeline
+                                .syncOperations
                                 .addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
                         case .osc1_1: // SLIP
-                            try channel.pipeline.syncOperations
+                            try channel.pipeline
+                                .syncOperations
                                 .addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
                         }
                         // add client handler
@@ -150,7 +157,7 @@ extension OSCTCPClient.Core {
                 bootstrap = bootstrap
                     .bind(to: interfaceAddress)
             }
-            
+
             let resolvedAddress: SocketAddress
             if !isIPv6Enabled, isIPv6AddressTranslationToIPv4Enabled {
                 // translate an IPv6 host/IP to an IPv4 if possible.
@@ -166,12 +173,12 @@ extension OSCTCPClient.Core {
                     isIPv6Enabled: isIPv6Enabled
                 )
             }
-            
+
             // connect to host
             let configuredChannel = try bootstrap
                 .connect(to: resolvedAddress)
                 .wait()
-            
+
             channel = configuredChannel
         }
     }
