@@ -14,15 +14,62 @@ extension OSCTCPClient {
     final class Core {
         typealias Parent = OSCTCPClient
 
-        var channel: (any Channel)?
+        /// Internal queue used for synchronizing access to mutable properties.
+        let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPClient.Core.syncQueue", target: .global())
+        
+        // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
+        // so we don't need to wrap it with `syncQueue` to synchronize
+        nonisolated(unsafe) var channel: (any Channel)?
+        
         let queue: DispatchQueue
-        var receiveHandler: OSCPacketHandler?
-        var receiveErrorHandler: OSCDecodeErrorHandlerBlock?
-        var notificationHandler: Parent.NotificationHandlerBlock?
+        
+        var receiveHandler: OSCPacketHandler? {
+            get { syncQueue.sync { _receiveHandler } }
+            set { syncQueue.sync { _receiveHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _receiveHandler: OSCPacketHandler?
+        
+        var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
+            get { syncQueue.sync { _receiveErrorHandler } }
+            set { syncQueue.sync { _receiveErrorHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _receiveErrorHandler: OSCDecodeErrorHandlerBlock?
+        
+        var notificationHandler: Parent.NotificationHandlerBlock? {
+            get { syncQueue.sync { _notificationHandler } }
+            set { syncQueue.sync { _notificationHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _notificationHandler: Parent.NotificationHandlerBlock?
 
+        var localPort: UInt16? {
+            if let port = channel?.localAddress?.port { UInt16(port) } else { nil }
+        }
+        
         let remoteHost: String
+        
         let remotePort: UInt16
+        
         let interface: String?
+        
+        var isIPv6Enabled: Bool {
+            get {
+                syncQueue.sync { _isIPv6Enabled }
+            }
+            set {
+                syncQueue.sync { _isIPv6Enabled = newValue }
+                if isConnected {
+                    print("Setting isIPv6Enabled will not have any effect until the TCP client is disconnected and reconnected again.")
+                }
+            }
+        }
+        nonisolated(unsafe) private var _isIPv6Enabled: Bool
+        
+        var isIPv6AddressTranslationToIPv4Enabled: Bool {
+            get { syncQueue.sync { _isIPv6AddressTranslationToIPv4Enabled } }
+            set { syncQueue.sync { _isIPv6AddressTranslationToIPv4Enabled = newValue } }
+        }
+        nonisolated(unsafe) private var _isIPv6AddressTranslationToIPv4Enabled: Bool = false
+        
         var isConnected: Bool {
             channel?.isActive ?? false
         }
@@ -33,6 +80,7 @@ extension OSCTCPClient {
             remoteHost: String,
             remotePort: UInt16,
             interface: String?,
+            isIPv6Enabled: Bool,
             framingMode: OSCTCPFramingMode,
             queue: DispatchQueue?,
             receiveHandler: OSCPacketHandler?
@@ -40,10 +88,14 @@ extension OSCTCPClient {
             self.remoteHost = remoteHost
             self.remotePort = remotePort
             self.interface = interface
+            _isIPv6Enabled = isIPv6Enabled
             self.framingMode = framingMode
-            let queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPClient.queue", target: .global())
+            let queue = queue ?? DispatchQueue(
+                label: "com.orchetect.SwiftOSC.OSCTCPClient.queue",
+                target: .global() // do NOT use syncQueue
+            )
             self.queue = queue
-            self.receiveHandler = receiveHandler
+            _receiveHandler = receiveHandler
         }
 
         deinit {
@@ -52,54 +104,85 @@ extension OSCTCPClient {
     }
 }
 
-extension OSCTCPClient.Core: @unchecked Sendable { } // TODO: unchecked
+extension OSCTCPClient.Core: Sendable { }
 
 // MARK: - Lifecycle
 
 extension OSCTCPClient.Core {
     func connect(timeout: TimeInterval) throws {
-        // negative values mean indefinite (no timeout) which is a bit dangerous
-        let timeout = Int64(max(1.0, timeout))
+        try queue.sync {
+            // sanitize inputs
+            // negative values mean indefinite (no timeout) which is a bit dangerous
+            let timeout = Int64(max(1.0, timeout))
 
-        let handler = ChannelHandler(oscServer: self)
+            let handler = ChannelHandler(oscServer: self)
 
-        // create the client bootstrap
-        var bootstrap = ClientBootstrap(group: .singletonMultiThreadedEventLoopGroup)
-            .connectTimeout(.seconds(timeout))
-            .channelInitializer { channel in
-                channel.eventLoop.makeCompletedFuture {
-                    // chose which decoder to use
-                    switch self.framingMode {
-                    case .osc1_0: // Length Header
-                        try channel.pipeline.syncOperations.addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
-                    case .osc1_1: // SLIP
-                        try channel.pipeline.syncOperations.addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
+            // create the client bootstrap
+            var bootstrap = ClientBootstrap(group: .singletonMultiThreadedEventLoopGroup)
+                .connectTimeout(.seconds(timeout))
+                .channelInitializer { channel in
+                    channel.eventLoop.makeCompletedFuture {
+                        // chose which decoder to use
+                        switch self.framingMode {
+                        case .osc1_0: // Length Header
+                            try channel.pipeline.syncOperations
+                                .addHandler(ByteToMessageHandler(OSCTCPLengthHeaderFrameDecoder()))
+                        case .osc1_1: // SLIP
+                            try channel.pipeline.syncOperations
+                                .addHandler(ByteToMessageHandler(OSCTCPSLIPFrameDecoder()))
+                        }
+                        // add client handler
+                        try channel.pipeline.syncOperations.addHandler(handler)
                     }
-                    // add client handler
-                    try channel.pipeline.syncOperations.addHandler(handler)
                 }
-            }
 
-        // bind to interface, if specified
-        if let interface {
-            guard let interface = try networkDevices(matchingNameOrAddress: interface, protocols: [.inet]).first else {
-                throw OSCIOError.invalidInterface
+            // bind to interface, if specified
+            if let interface {
+                let interfaceAddress = switch interface {
+                case "0.0.0.0",
+                     "::" where isIPv6Enabled:
+                    // pass thru wildcard
+                    try SocketAddress.makeAddressResolvingHost(interface, port: 0)
+                default:
+                    try resolveSocketAddress(ofNetworkDeviceNameOrAddress: interface, forRemoteHost: remoteHost)
+                }
+
+                bootstrap = bootstrap
+                    .bind(to: interfaceAddress)
             }
-            bootstrap = bootstrap
-                .bind(to: interface.address)
+            
+            let resolvedAddress: SocketAddress
+            if !isIPv6Enabled, isIPv6AddressTranslationToIPv4Enabled {
+                // translate an IPv6 host/IP to an IPv4 if possible.
+                let proposedRemoteHost = try IPUtils.ipAddressUsingReverseLookup(forHostnameOrIPAddress: self.remoteHost, family: .ipv4)
+                guard let proposedRemoteHost else {
+                    throw OSCIOError.noRemoteHost // TODO: could use a new invalidRemoteHost case
+                }
+                resolvedAddress = try SocketAddress(ipAddress: proposedRemoteHost, port: Int(remotePort))
+            } else {
+                resolvedAddress = try resolveSocketAddressPreferringIPv4(
+                    forHostnameOrIPAddress: remoteHost,
+                    port: remotePort,
+                    isIPv6Enabled: isIPv6Enabled
+                )
+            }
+            
+            // connect to host
+            let configuredChannel = try bootstrap
+                .connect(to: resolvedAddress)
+                .wait()
+            
+            channel = configuredChannel
         }
-
-        // connect to host
-        channel = try bootstrap
-            .connect(host: remoteHost, port: Int(remotePort))
-            .wait()
     }
 
     func close() {
-        // close the connection
-        channel?.close(promise: nil)
-        // deallocate channel
-        channel = nil
+        queue.sync {
+            // close the connection
+            channel?.close(promise: nil)
+            // deallocate channel
+            channel = nil
+        }
     }
 }
 
@@ -133,20 +216,14 @@ extension OSCTCPClient.Core: OSCTCPGeneratesClientNotificationsProtocol {
 
 extension OSCTCPClient.Core {
     func setReceiveHandler(_ handler: OSCPacketHandler?) {
-        queue.sync {
-            self.receiveHandler = handler
-        }
+        receiveHandler = handler
     }
 
     func setReceiveErrorHandler(_ handler: OSCDecodeErrorHandlerBlock?) {
-        queue.sync {
-            self.receiveErrorHandler = handler
-        }
+        receiveErrorHandler = handler
     }
 
     func setNotificationHandler(_ handler: Parent.NotificationHandlerBlock?) {
-        queue.sync {
-            self.notificationHandler = handler
-        }
+        notificationHandler = handler
     }
 }

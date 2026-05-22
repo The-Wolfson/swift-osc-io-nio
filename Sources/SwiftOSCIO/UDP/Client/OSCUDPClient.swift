@@ -15,13 +15,16 @@ public final class OSCUDPClient: OSCUDPClientProtocol {
         localPort: UInt16?,
         interface: String?,
         isPortReuseEnabled: Bool,
-        isIPv4BroadcastEnabled: Bool
+        isIPv4BroadcastEnabled: Bool,
+        isIPv6Enabled: Bool
     ) {
         core = Core(
             localPort: localPort,
             interface: interface,
             isPortReuseEnabled: isPortReuseEnabled,
-            isIPv4BroadcastEnabled: isIPv4BroadcastEnabled
+            isIPv4BroadcastEnabled: isIPv4BroadcastEnabled,
+            isIPv6Enabled: isIPv6Enabled,
+            queue: nil
         )
     }
 
@@ -59,6 +62,11 @@ public final class OSCUDPClient: OSCUDPClientProtocol {
     public var isIPv4BroadcastEnabled: Bool {
         get { core.isIPv4BroadcastEnabled }
         set { core.isIPv4BroadcastEnabled = newValue }
+    }
+
+    public var isIPv6Enabled: Bool {
+        get { core.isIPv6Enabled }
+        set { core.isIPv6Enabled = newValue }
     }
 
     public var isStarted: Bool {
