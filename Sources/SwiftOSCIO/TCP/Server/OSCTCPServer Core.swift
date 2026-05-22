@@ -14,28 +14,73 @@ extension OSCTCPServer {
     final class Core {
         typealias Parent = OSCTCPServer
 
-        var channel: (any Channel)?
-        private var _clients: [OSCTCPClientSessionID: ClientConnection] = [:]
+        /// Internal queue used for synchronizing access to mutable properties.
+        let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPServer.Core.syncQueue", target: .global())
+
+        // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
+        // so we don't need to wrap it with `syncQueue` to synchronize
+        nonisolated(unsafe) var channel: (any Channel)?
+        
+        /// Currently connected client sessions.
+        private var _clients: [OSCTCPClientSessionID: ClientConnection] {
+            get {
+                syncQueue.sync { __clients }
+            }
+            _modify {
+                var value = syncQueue.sync { __clients }
+                yield &value
+                syncQueue.sync { __clients = value }
+            }
+            set {
+                syncQueue.sync { __clients = newValue }
+            }
+        }
+        nonisolated(unsafe) private var __clients: [OSCTCPClientSessionID: ClientConnection] = [:]
+        
         let queue: DispatchQueue
-        var receiveHandler: OSCPacketHandler?
-        var receiveErrorHandler: OSCDecodeErrorHandlerBlock?
-        var notificationHandler: NotificationHandlerBlock?
+        
+        var receiveHandler: OSCPacketHandler? {
+            get { syncQueue.sync { _receiveHandler } }
+            set { syncQueue.sync { _receiveHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _receiveHandler: OSCPacketHandler?
+        
+        var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
+            get { syncQueue.sync { _receiveErrorHandler } }
+            set { syncQueue.sync { _receiveErrorHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _receiveErrorHandler: OSCDecodeErrorHandlerBlock?
+        
+        var notificationHandler: Parent.NotificationHandlerBlock? {
+            get { syncQueue.sync { _notificationHandler } }
+            set { syncQueue.sync { _notificationHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _notificationHandler: Parent.NotificationHandlerBlock?
 
         var localPort: UInt16 {
             UInt16(channel?.localAddress?.port ?? 0)
         }
 
-        private var _localPort: UInt16?
+        private var preferredLocalPort: UInt16? {
+            get { syncQueue.sync { _preferredLocalPort } }
+            set { syncQueue.sync { _preferredLocalPort = newValue } }
+        }
+        nonisolated(unsafe) private var _preferredLocalPort: UInt16?
 
         let interface: String?
 
         var isIPv6Enabled: Bool {
-            didSet {
+            get {
+                syncQueue.sync { _isIPv6Enabled }
+            }
+            set {
+                syncQueue.sync { _isIPv6Enabled = newValue }
                 if isStarted {
                     print("Setting isIPv6Enabled will not have any effect until the TCP server is stopped and restarted again.")
                 }
             }
         }
+        nonisolated(unsafe) private var _isIPv6Enabled: Bool
 
         var isStarted: Bool {
             channel?.isActive ?? false
@@ -51,13 +96,16 @@ extension OSCTCPServer {
             queue: DispatchQueue?,
             receiveHandler: OSCPacketHandler?
         ) {
-            _localPort = (port == nil || port == 0) ? nil : port
+            _preferredLocalPort = (port == nil || port == 0) ? nil : port
             self.interface = interface
-            self.isIPv6Enabled = isIPv6Enabled
+            _isIPv6Enabled = isIPv6Enabled
             self.framingMode = framingMode
-            let queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPServer.queue", target: .global())
+            let queue = queue ?? DispatchQueue(
+                label: "com.orchetect.SwiftOSC.OSCTCPServer.queue",
+                target: .global() // do NOT use syncQueue
+            )
             self.queue = queue
-            self.receiveHandler = receiveHandler
+            _receiveHandler = receiveHandler
         }
 
         deinit {
@@ -66,7 +114,7 @@ extension OSCTCPServer {
     }
 }
 
-extension OSCTCPServer.Core: @unchecked Sendable { } // TODO: unchecked
+extension OSCTCPServer.Core: Sendable { }
 
 // MARK: - Lifecycle
 
@@ -107,7 +155,7 @@ extension OSCTCPServer.Core {
                 isIPv6Enabled ? "::" : "0.0.0.0"
             }
 
-            let port = Int(_localPort ?? localPort)
+            let port = Int(preferredLocalPort ?? localPort)
 
             let configuredChannel = bootstrap
                 .bind(host: host, port: port)
@@ -181,33 +229,25 @@ extension OSCTCPServer.Core: OSCTCPGeneratesServerNotificationsProtocol {
 
 extension OSCTCPServer.Core {
     func setReceiveHandler(_ handler: OSCPacketHandler?) {
-        queue.sync {
-            self.receiveHandler = handler
-        }
+        receiveHandler = handler
     }
 
     func setReceiveErrorHandler(_ handler: OSCDecodeErrorHandlerBlock?) {
-        queue.sync {
-            self.receiveErrorHandler = handler
-        }
+        receiveErrorHandler = handler
     }
 
     func setNotificationHandler(_ handler: Parent.NotificationHandlerBlock?) {
-        queue.sync {
-            self.notificationHandler = handler
-        }
+        notificationHandler = handler
     }
 
     var clients: [OSCTCPClientSessionID: (host: String, port: UInt16)] {
-        queue.sync {
-            _clients
-                .reduce(into: [:] as [OSCTCPClientSessionID: (host: String, port: UInt16)]) { base, element in
-                    base[element.key] = (
-                        host: element.value.remoteHost,
-                        port: element.value.remotePort
-                    )
-                }
-        }
+        _clients
+            .reduce(into: [:] as [OSCTCPClientSessionID: (host: String, port: UInt16)]) { base, element in
+                base[element.key] = (
+                    host: element.value.remoteHost,
+                    port: element.value.remotePort
+                )
+            }
     }
 
     func disconnectClient(clientID: OSCTCPClientSessionID) {
@@ -220,7 +260,7 @@ extension OSCTCPServer.Core {
 extension OSCTCPServer.Core {
     /// Close connections for any connected clients and remove them from the list of connected clients.
     func closeClients() {
-        let clientIDs = queue.sync { _clients.keys } // take local copy before mutating collection
+        let clientIDs = _clients.keys // take local copy before mutating collection
         for clientID in clientIDs {
             closeClient(clientID: clientID)
         }
@@ -234,25 +274,23 @@ extension OSCTCPServer.Core {
             clientID: clientID,
             framingMode: framingMode
         )
-        queue.sync {
-            _clients[clientID] = connection
-        }
+        _clients[clientID] = connection
 
         return clientID
     }
 
     /// Generate a new client ID that is not currently in use by any connected client(s).
     private func newClientID() -> OSCTCPClientSessionID {
-        let clientID = queue.sync {
+        queue.sync {
             var clientID = 0
             while clientID == 0 || _clients.keys.contains(clientID) {
                 // don't allow 0 or negative numbers
                 clientID = Int.random(in: 1 ... Int.max)
             }
+            
+            assert(clientID > 0)
             return clientID
         }
-        assert(clientID > 0)
-        return clientID
     }
 
     /// Close a connection and remove it from the list of connected clients.

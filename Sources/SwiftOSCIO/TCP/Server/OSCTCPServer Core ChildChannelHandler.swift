@@ -9,17 +9,32 @@ import NIO
 
 extension OSCTCPServer.Core {
     final class ChildChannelHandler {
+        nonisolated(unsafe)
         weak var server: OSCTCPServer.Core?
-        var clientID: OSCTCPClientSessionID = 0
+        
+        /// Internal queue used for synchronizing access to mutable properties.
+        let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPServer.Core.ChildChannelHandler.syncQueue", target: .global())
+        
+        var clientID: OSCTCPClientSessionID {
+            get { syncQueue.sync { _clientID } }
+            set { syncQueue.sync { _clientID = newValue } }
+        }
+        nonisolated(unsafe) private var _clientID: OSCTCPClientSessionID = 0
 
         /// Stores an error captured in `errorCaught` for use in `channelInactive`.
-        private var pendingError: (any Error)?
+        private var pendingError: (any Error)? {
+            get { syncQueue.sync { _pendingError } }
+            set { syncQueue.sync { _pendingError = newValue } }
+        }
+        nonisolated(unsafe) private var _pendingError: (any Error)?
 
         init(server: OSCTCPServer.Core? = nil) {
             self.server = server
         }
     }
 }
+
+extension OSCTCPServer.Core.ChildChannelHandler: Sendable { }
 
 extension OSCTCPServer.Core.ChildChannelHandler: ChannelInboundHandler {
     typealias InboundIn = ByteBuffer
@@ -65,5 +80,3 @@ extension OSCTCPServer.Core.ChildChannelHandler: ChannelInboundHandler {
         context.close(promise: nil)
     }
 }
-
-extension OSCTCPServer.Core.ChildChannelHandler: @unchecked Sendable { }

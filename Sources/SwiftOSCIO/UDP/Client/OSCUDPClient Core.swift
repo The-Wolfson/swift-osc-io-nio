@@ -14,29 +14,47 @@ extension OSCUDPClient {
     final class Core {
         typealias Parent = OSCUDPClient
 
+        /// Internal queue used for synchronizing access to mutable properties.
+        let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPClient.Core.syncQueue", target: .global())
+        
         let queue: DispatchQueue
 
-        private var ipv4Channel: (any Channel)?
-        private var ipv6Channel: (any Channel)?
+        // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
+        // so we don't need to wrap it with `syncQueue` to synchronize
+        nonisolated(unsafe) private var ipv4Channel: (any Channel)?
+        
+        // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
+        // so we don't need to wrap it with `syncQueue` to synchronize
+        nonisolated(unsafe) private var ipv6Channel: (any Channel)?
 
         var localPort: UInt16 {
             if let port = ipv4Channel?.localAddress?.port ?? ipv6Channel?.localAddress?.port{
                 UInt16(port)
             } else {
-                _localPort ?? 0
+                syncQueue.sync { preferredLocalPort } ?? 0
             }
         }
+        
+        private var preferredLocalPort: UInt16? {
+            get { syncQueue.sync { _preferredLocalPort } }
+            set { syncQueue.sync { _preferredLocalPort = newValue } }
+        }
+        nonisolated(unsafe) private var _preferredLocalPort: UInt16?
 
-        private var _localPort: UInt16?
+        let interface: String?
 
-        private(set) var interface: String?
-
-        var isPortReuseEnabled: Bool = false
+        var isPortReuseEnabled: Bool {
+            get { syncQueue.sync { _isPortReuseEnabled } }
+            set { syncQueue.sync { _isPortReuseEnabled = newValue } }
+        }
+        nonisolated(unsafe) private var _isPortReuseEnabled: Bool
 
         var isIPv4BroadcastEnabled: Bool {
-            get { _isIPv4BroadcastEnabled }
+            get {
+                syncQueue.sync { _isIPv4BroadcastEnabled }
+            }
             set {
-                _isIPv4BroadcastEnabled = newValue
+                syncQueue.sync { _isIPv4BroadcastEnabled = newValue }
                 let broadcast: ChannelOptions.Types.SocketOption.Value = newValue ? 1 : 0
 
                 ipv4Channel?
@@ -44,15 +62,20 @@ extension OSCUDPClient {
                     .whenComplete { error in }
             }
         }
-        private var _isIPv4BroadcastEnabled: Bool = false
+        nonisolated(unsafe) private var _isIPv4BroadcastEnabled: Bool = false
 
         var isIPv6Enabled: Bool {
-            didSet {
+            get {
+                syncQueue.sync { _isIPv6Enabled }
+            }
+            set {
+                syncQueue.sync { _isIPv6Enabled = newValue }
                 if isStarted {
                     print("Setting isIPv6Enabled will not have any effect until the UDP client is stopped and started again.")
                 }
             }
         }
+        nonisolated(unsafe) private var _isIPv6Enabled: Bool
 
         var isStarted: Bool {
             isIPv4Started || isIPv6Started
@@ -74,12 +97,15 @@ extension OSCUDPClient {
             isIPv6Enabled: Bool,
             queue: DispatchQueue?
         ) {
-            self.queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPClient.queue", target: .global())
-            _localPort = (localPort == nil || localPort == 0) ? nil : localPort
+            self.queue = queue ?? DispatchQueue(
+                label: "com.orchetect.SwiftOSC.OSCUDPClient.queue",
+                target: .global() // do NOT use syncQueue
+            )
+            _preferredLocalPort = (localPort == nil || localPort == 0) ? nil : localPort
             self.interface = interface
-            self.isPortReuseEnabled = isPortReuseEnabled
-            self.isIPv6Enabled = isIPv6Enabled
-            self.isIPv4BroadcastEnabled = isIPv4BroadcastEnabled
+            _isPortReuseEnabled = isPortReuseEnabled
+            _isIPv6Enabled = isIPv6Enabled
+            _isIPv4BroadcastEnabled = isIPv4BroadcastEnabled
         }
 
         deinit {
@@ -88,7 +114,7 @@ extension OSCUDPClient {
     }
 }
 
-extension OSCUDPClient.Core: @unchecked Sendable { } // TODO: unchecked
+extension OSCUDPClient.Core: Sendable { }
 
 // MARK: - Lifecycle
 
@@ -121,7 +147,7 @@ extension OSCUDPClient.Core {
         // `nil` return value is not an error condition; just means this channel is not used
         guard let host = try hostAddressStringForBinding(interface: interface, isIPv4: isIPv4) else { return nil }
         
-        let port = Int(_localPort ?? 0)
+        let port = Int(preferredLocalPort ?? 0)
         
         // Channel Setup
         let reuseAddress: ChannelOptions.Types.SocketOption.Value = isPortReuseEnabled ? 1 : 0

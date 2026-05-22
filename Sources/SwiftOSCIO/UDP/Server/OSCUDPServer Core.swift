@@ -13,32 +13,64 @@ extension OSCUDPServer {
     final class Core {
         typealias Parent = OSCUDPServer
 
-        private var ipv4Channel: (any Channel)?
-        private var ipv6Channel: (any Channel)?
+        /// Internal queue used for synchronizing access to mutable properties.
+        let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPServer.Core.syncQueue", target: .global())
+
         let queue: DispatchQueue
-        var receiveHandler: OSCPacketHandler?
-        var receiveErrorHandler: OSCDecodeErrorHandlerBlock?
+
+        // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
+        // so we don't need to wrap it with `syncQueue` to synchronize
+        nonisolated(unsafe) private var ipv4Channel: (any Channel)?
+        
+        // anywhere that we are assigning this variable, it is wrapped in sync calls to `queue`
+        // so we don't need to wrap it with `syncQueue` to synchronize
+        nonisolated(unsafe) private var ipv6Channel: (any Channel)?
+        
+        var receiveHandler: OSCPacketHandler? {
+            get { syncQueue.sync { _receiveHandler } }
+            set { syncQueue.sync { _receiveHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _receiveHandler: OSCPacketHandler?
+        
+        var receiveErrorHandler: OSCDecodeErrorHandlerBlock? {
+            get { syncQueue.sync { _receiveErrorHandler } }
+            set { syncQueue.sync { _receiveErrorHandler = newValue } }
+        }
+        nonisolated(unsafe) private var _receiveErrorHandler: OSCDecodeErrorHandlerBlock?
 
         var localPort: UInt16 {
             if let port = ipv4Channel?.localAddress?.port ?? ipv6Channel?.localAddress?.port {
                 return UInt16(port)
             }
-            return _localPort ?? 0
+            return preferredLocalPort ?? 0
         }
 
-        private var _localPort: UInt16?
+        private var preferredLocalPort: UInt16? {
+            get { syncQueue.sync { _preferredLocalPort } }
+            set { syncQueue.sync { _preferredLocalPort = newValue } }
+        }
+        nonisolated(unsafe) private var _preferredLocalPort: UInt16?
 
-        private(set) var interface: String?
+        let interface: String?
 
-        var isPortReuseEnabled: Bool = false
+        var isPortReuseEnabled: Bool {
+            get { syncQueue.sync { _isPortReuseEnabled } }
+            set { syncQueue.sync { _isPortReuseEnabled = newValue } }
+        }
+        nonisolated(unsafe) private var _isPortReuseEnabled: Bool
 
         var isIPv6Enabled: Bool {
-            didSet {
+            get {
+                syncQueue.sync { _isIPv6Enabled }
+            }
+            set {
+                syncQueue.sync { _isIPv6Enabled = newValue }
                 if isStarted {
                     print("Setting isIPv6Enabled will not have any effect until the UDP server is stopped and started again.")
                 }
             }
         }
+        nonisolated(unsafe) private var _isIPv6Enabled: Bool
 
         var isStarted: Bool {
             isIPv4Started || isIPv6Started
@@ -60,13 +92,16 @@ extension OSCUDPServer {
             queue: DispatchQueue?,
             receiveHandler: OSCPacketHandler?
         ) {
-            _localPort = (port == nil || port == 0) ? nil : port
+            _preferredLocalPort = (port == nil || port == 0) ? nil : port
             self.interface = interface
-            self.isPortReuseEnabled = isPortReuseEnabled
-            self.isIPv6Enabled = isIPv6Enabled
-            let queue = queue ?? DispatchQueue(label: "com.orchetect.SwiftOSC.OSCUDPServer.queue", target: .global())
+            _isPortReuseEnabled = isPortReuseEnabled
+            _isIPv6Enabled = isIPv6Enabled
+            let queue = queue ?? DispatchQueue(
+                label: "com.orchetect.SwiftOSC.OSCUDPServer.queue",
+                target: .global() // do NOT use syncQueue
+            )
             self.queue = queue
-            self.receiveHandler = receiveHandler
+            _receiveHandler = receiveHandler
         }
 
         deinit {
@@ -75,7 +110,7 @@ extension OSCUDPServer {
     }
 }
 
-extension OSCUDPServer.Core: @unchecked Sendable { } // TODO: unchecked
+extension OSCUDPServer.Core: Sendable { }
 
 // MARK: - Lifecycle
 
@@ -108,7 +143,7 @@ extension OSCUDPServer.Core {
         // `nil` return value is not an error condition; just means this channel is not used
         guard let host = try hostAddressStringForBinding(interface: interface, isIPv4: isIPv4) else { return nil }
         
-        let port = Int(_localPort ?? localPort)
+        let port = Int(preferredLocalPort ?? localPort)
         
         let reuseAddress: ChannelOptions.Types.SocketOption.Value = isPortReuseEnabled ? 1 : 0
         let bootstrap = DatagramBootstrap(group: .singletonMultiThreadedEventLoopGroup)
@@ -152,14 +187,10 @@ extension OSCUDPServer.Core: _OSCPacketDispatcherProtocol {
 
 extension OSCUDPServer.Core {
     func setReceiveHandler(_ handler: OSCPacketHandler?) {
-        queue.sync {
-            self.receiveHandler = handler
-        }
+        receiveHandler = handler
     }
 
     func setReceiveErrorHandler(_ handler: OSCDecodeErrorHandlerBlock?) {
-        queue.sync {
-            self.receiveErrorHandler = handler
-        }
+        receiveErrorHandler = handler
     }
 }

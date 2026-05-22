@@ -11,10 +11,18 @@ import NIO
 extension OSCTCPClient.Core {
     /// Internal TCP receiver class so as to not expose  methods as public.
     final class ChannelHandler {
+        nonisolated(unsafe)
         weak var oscServer: (any _OSCTCPPacketDispatcherProtocol & OSCTCPGeneratesClientNotificationsProtocol)?
 
+        /// Internal queue used for synchronizing access to mutable properties.
+        let syncQueue = DispatchQueue(label: "com.orchetect.SwiftOSC.OSCTCPClient.Core.ChannelHandler.syncQueue", target: .global())
+        
         /// Stores an error captured in `errorCaught` for use in `channelInactive`.
-        private var pendingError: (any Error)?
+        private var pendingError: (any Error)? {
+            get { syncQueue.sync { _pendingError } }
+            set { syncQueue.sync { _pendingError = newValue } }
+        }
+        nonisolated(unsafe) private var _pendingError: (any Error)?
 
         init(oscServer: (any _OSCTCPPacketDispatcherProtocol & OSCTCPGeneratesClientNotificationsProtocol)? = nil) {
             self.oscServer = oscServer
@@ -22,7 +30,7 @@ extension OSCTCPClient.Core {
     }
 }
 
-extension OSCTCPClient.Core.ChannelHandler: @unchecked Sendable { } // TODO: unchecked
+extension OSCTCPClient.Core.ChannelHandler: Sendable { }
 
 extension OSCTCPClient.Core.ChannelHandler: ChannelInboundHandler {
     typealias InboundIn = ByteBuffer

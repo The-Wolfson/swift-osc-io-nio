@@ -9,12 +9,15 @@ import NIO
 import SwiftOSCCore
 
 final class OSCUDPChannelHandler {
+    nonisolated(unsafe)
     weak var oscServer: (any _OSCPacketDispatcherProtocol)?
 
     init(oscServer: (any _OSCPacketDispatcherProtocol)? = nil) {
         self.oscServer = oscServer
     }
 }
+
+extension OSCUDPChannelHandler: Sendable { }
 
 extension OSCUDPChannelHandler: ChannelInboundHandler {
     typealias InboundIn = AddressedEnvelope<ByteBuffer>
@@ -40,7 +43,7 @@ extension OSCUDPChannelHandler: ChannelInboundHandler {
 }
 
 extension OSCUDPChannelHandler {
-    /// Stub required to take `oscServer` as sending.
+    /// Stub used to dispatch to a non-Optional instance of `oscServer`.
     private func _handle(
         oscServer: any _OSCPacketDispatcherProtocol,
         data: Data,
@@ -50,5 +53,3 @@ extension OSCUDPChannelHandler {
         oscServer.dispatch(receivedPacket: data, remoteHost: remoteHost, remotePort: remotePort)
     }
 }
-
-extension OSCUDPChannelHandler: @unchecked Sendable { }
