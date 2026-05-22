@@ -31,7 +31,7 @@ extension OSCUDPClient {
             if let port = ipv4Channel?.localAddress?.port ?? ipv6Channel?.localAddress?.port{
                 UInt16(port)
             } else {
-                syncQueue.sync { preferredLocalPort } ?? 0
+                preferredLocalPort ?? 0
             }
         }
         
